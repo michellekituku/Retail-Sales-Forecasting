@@ -34,3 +34,7 @@ retail-sales-forecasting/
 │
 ├─ README.md                   # Project overview, instructions, and documentation
 └─ .gitignore                  # Files/folders to exclude from Git
+
+## Dataset
+The retail sales dataset was obtained from [Kaggle](https://www.kaggle.com/datasets/mohammadtalib786/retail-sales-dataset/data). 
+
