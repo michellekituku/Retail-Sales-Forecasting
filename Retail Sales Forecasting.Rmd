@@ -1,0 +1,251 @@
+---
+title: "Retail Sales Forecasting"
+author: "Michelle Kituku"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Retail Sales Forecasting with ARIMA & SARIMA
+
+## Load Libraries
+```{r}
+library(tidyverse)
+library(lubridate)
+library(forecast)
+library(ggplot2)
+```
+
+## Load and clean 2023 data
+```{r}
+data_2023 <- read.csv("retail_sales.csv", stringsAsFactors = FALSE)
+
+# Rename columns to remove spaces
+colnames(data_2023) <- c("TransactionID", "Date", "CustomerID", "Gender", "Age",
+                         "ProductCategory", "Quantity", "PricePerUnit", "TotalAmount")
+
+# Convert Date to Date type
+data_2023$Date <- as.Date(data_2023$Date)  # YYYY-MM-DD format works directly
+
+# Ensure other columns are correct type
+data_2023$Gender <- as.character(data_2023$Gender)
+data_2023$ProductCategory <- as.character(data_2023$ProductCategory)
+data_2023$Age <- as.numeric(data_2023$Age)
+data_2023$Quantity <- as.numeric(data_2023$Quantity)
+data_2023$PricePerUnit <- as.numeric(data_2023$PricePerUnit)
+data_2023$TotalAmount <- as.numeric(data_2023$TotalAmount)
+
+```
+
+## Generate Synthetic 2024 data based on the 2023 data
+```{r}
+set.seed(123)  # reproducibility
+n_2024 <- 1000
+
+data_2024 <- data.frame(
+  TransactionID = 1001:(1000 + n_2024),
+  Date = sample(seq(as.Date("2024-01-01"), as.Date("2024-12-31"), by="day"),
+                n_2024, replace = TRUE),
+  CustomerID = paste0("CUST", sprintf("%03d", sample(1:2000, n_2024, replace=TRUE))),
+  Gender = sample(data_2023$Gender, n_2024, replace=TRUE),
+  Age = sample(data_2023$Age, n_2024, replace=TRUE),
+  ProductCategory = sample(data_2023$ProductCategory, n_2024, replace=TRUE),
+  Quantity = sample(data_2023$Quantity, n_2024, replace=TRUE),
+  PricePerUnit = sample(data_2023$PricePerUnit, n_2024, replace=TRUE)
+)
+
+# Compute TotalAmount
+data_2024$TotalAmount <- data_2024$Quantity * data_2024$PricePerUnit
+
+# Ensure types match 2023
+data_2024$Date <- as.Date(data_2024$Date)
+data_2024$Gender <- as.character(data_2024$Gender)
+data_2024$ProductCategory <- as.character(data_2024$ProductCategory)
+data_2024$Age <- as.numeric(data_2024$Age)
+data_2024$Quantity <- as.numeric(data_2024$Quantity)
+data_2024$PricePerUnit <- as.numeric(data_2024$PricePerUnit)
+data_2024$TotalAmount <- as.numeric(data_2024$TotalAmount)
+```
+Creates a synthetic dataset for 2024 with randomly sampled customer info and sales values, following the 2023 distributions.
+
+TotalAmount is computed as Quantity * PricePerUnit
+
+## Combine 2023 data with generated 2024 data
+```{r}
+combined_data <- rbind(data_2023, data_2024)
+
+# Optional: sort by TransactionID
+combined_data <- combined_data %>% arrange(TransactionID)
+
+# Check combined data
+dim(combined_data)  # should be 2000 x 9
+head(combined_data)
+tail(combined_data)
+summary(combined_data)
+```
+Merges 2023 and 2024 data into a single dataset for time series analysis.
+
+## Save combined CSV
+```{r}
+write.csv(combined_data, "combined_retail_sales.csv", row.names = FALSE)
+```
+
+## Prepare the data
+```{r}
+# Aggregate total sales per day
+daily_sales <- combined_data %>%
+  group_by(Date) %>%
+  summarise(TotalSales = sum(TotalAmount)) %>%
+  arrange(Date)
+
+# Check
+head(daily_sales)
+```
+Groups data by Date and sums TotalAmount to get daily total sales
+
+## Convert to time series
+```{r}
+# Fill missing dates (important for daily TS)
+all_dates <- data.frame(Date = seq(min(daily_sales$Date), max(daily_sales$Date), by = "day"))
+daily_sales <- left_join(all_dates, daily_sales, by = "Date")
+daily_sales$TotalSales[is.na(daily_sales$TotalSales)] <- 0  # fill missing days with 0
+
+# Convert to ts
+sales_ts <- ts(daily_sales$TotalSales, frequency = 365, start = c(2023, yday(min(daily_sales$Date))))
+
+```
+Converts the daily sales into a time series object with yearly frequency (365 days).
+
+## Visualize the sales
+```{r}
+ggplot(daily_sales, aes(x = Date, y = TotalSales)) +
+  geom_line(color = "steelblue") +
+  labs(title = "Daily Total Sales", x = "Date", y = "Total Sales") +
+  theme_minimal()
+
+```
+
+## Decompose the Time Series
+```{r}
+# Decompose using STL (Seasonal-Trend decomposition)
+decomp <- stl(sales_ts, s.window = "periodic")
+
+# Plot decomposition
+plot(decomp, main = "Decomposition of Daily Sales")
+
+```
+stl() decomposes the series using a seasonal window.
+
+The plot shows trend, seasonal cycles, and random noise.
+
+## Check Stationarity
+```{r}
+library(tseries)
+
+adf_test <- adf.test(sales_ts, alternative = "stationary")
+adf_test
+
+```
+Augmented Dickey-Fuller test:
+
+Null hypothesis: series is non-stationary
+
+p-value < 0.05 → series is stationary
+
+Interpretation: If stationary (p < 0.05), we can fit ARIMA/SARIMA directly.
+
+## Holt-Winters Forecast
+```{r}
+hw_model <- HoltWinters(sales_ts)
+hw_forecast <- forecast(hw_model, h = 30)  # forecast next 30 days
+
+# Plot
+plot(hw_forecast, main = "Holt-Winters Forecast of Daily Sales")
+
+```
+Captures trend and seasonality for short-term forecasting.
+
+## ARIMA Forecast
+```{r}
+# Automatically select best ARIMA model
+arima_model <- auto.arima(sales_ts)
+arima_forecast <- forecast(arima_model, h = 30)
+
+# Plot
+plot(arima_forecast, main = "ARIMA Forecast of Daily Sales")
+
+```
+Automatically selects the best ARIMA model based on AIC.
+
+Handles non-seasonal patterns effectively.
+
+## SARIMA Forecast (Seasonal ARIMA)
+```{r}
+# Use frequency = 365 for yearly seasonality or 7 for weekly
+sarima_model <- auto.arima(sales_ts, seasonal = TRUE)
+sarima_forecast <- forecast(sarima_model, h = 30)
+
+# Plot
+plot(sarima_forecast, main = "SARIMA Forecast of Daily Sales")
+
+```
+Seasonal ARIMA for yearly or weekly patterns in the data.
+
+## Compare Forecasts
+```{r}
+autoplot(sales_ts) +
+  autolayer(hw_forecast$mean, series = "Holt-Winters", color = "red") +
+  autolayer(arima_forecast$mean, series = "ARIMA", color = "green") +
+  autolayer(sarima_forecast$mean, series = "SARIMA", color = "blue") +
+  labs(title = "Sales Forecast Comparison", y = "Total Sales", x = "Date") +
+  theme_minimal()
+
+```
+Overlays all forecasts for easy comparison.
+
+Helps visually check which model best fits the trends and seasonal patterns.
+
+## Quantitative comparison
+```{r}
+# Holt-Winters
+accuracy(hw_forecast)
+
+# ARIMA
+accuracy(arima_forecast)
+
+# SARIMA
+accuracy(sarima_forecast)
+
+```
+Interpretation
+
+1. RMSE (Root Mean Squared Error): Lower is better.
+
+- Holt-Winters (1154) < ARIMA/SARIMA (1204), so Holt-Winters fits slightly better on the training set.
+
+2. MAE (Mean Absolute Error): Lower is better.
+
+- Holt-Winters (660) < ARIMA/SARIMA (938) → again, Holt-Winters is better.
+
+3. MAPE (Mean Absolute Percentage Error): Inf
+
+- This happens because some daily sales values are 0, causing division by zero. It’s common in sparse retail data.
+
+- Ignore MAPE here and focus on RMSE/MAE.
+
+4. ME (Mean Error):
+
+- Holt-Winters has a slightly larger negative bias (-32), ARIMA/SARIMA almost 0.
+
+5. ACF1 (lag-1 autocorrelation of residuals):
+
+- Holt-Winters: 0.07 (small autocorrelation, acceptable)
+
+- ARIMA/SARIMA: ~0 (residuals uncorrelated, good)
+
+Conclusion
+
+- Based on RMSE and MAE, Holt-Winters performs best on your training set.
+
+- ARIMA and SARIMA are very close and slightly worse.
