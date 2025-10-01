@@ -38,3 +38,6 @@ retail-sales-forecasting/
 ## Dataset
 The retail sales dataset was obtained from [Kaggle](https://www.kaggle.com/datasets/mohammadtalib786/retail-sales-dataset/data). 
 
+## HTML file
+You can view the rendered report [here](Retail-Sales-Forecasting.html).
+
